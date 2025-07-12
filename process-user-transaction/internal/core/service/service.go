@@ -1,8 +1,11 @@
 package service
 
 import (
+	"context"
 	"fmt"
+	"github.com/shopspring/decimal"
 	"process-user-transaction/internal/adapters/outbound/repository"
+	"process-user-transaction/internal/core/domain"
 	"strconv"
 	"strings"
 )
@@ -14,7 +17,7 @@ type Service struct {
 }
 
 type IService interface {
-	ProcessUserTransactions([]repository.Transaction) error
+	ProcessUserTransactions([]domain.Transaction) (domain.UserTransactionInfo, error)
 }
 
 func NewService(repository repository.ITransactionRepository) *Service {
@@ -23,53 +26,49 @@ func NewService(repository repository.ITransactionRepository) *Service {
 	}
 }
 
-type MonthAverage struct {
-	averages    map[int]float64
-	trxPerMonth map[int]int
-}
+func (s *Service) ProcessUserTransactions(transactions []domain.Transaction) (domain.UserTransactionInfo, error) {
+	var userTransactionInfo domain.UserTransactionInfo
 
-func (s *Service) ProcessUserTransactions(transactions []repository.Transaction) error {
-	var balance float64
-	var monthAverage MonthAverage
-
-	monthAverage.averages = make(map[int]float64)
-	monthAverage.trxPerMonth = make(map[int]int)
+	userTransactionInfo.MonthlyAverages = make(map[int]decimal.Decimal)
+	userTransactionInfo.MonthlyTransactionsAmount = make(map[int]decimal.Decimal)
+	userTransactionInfo.MonthlyTransactions = make(map[int]int64)
 
 	for _, transaction := range transactions {
-		//err := s.r.PutUser(context.Background(), transaction)
+		err := s.r.PutTransaction(context.Background(), transaction)
 		trxMonth := strings.Split(transaction.CreatedDate, "/")[0]
 		month, err := strconv.Atoi(trxMonth)
 		if err != nil {
-			return err
+			return domain.UserTransactionInfo{}, err
 		}
-		monthAverage.trxPerMonth[month] += 1
-		if monthAverage.averages[month] != 0.0 {
-			monthAverage.averages[month] = (monthAverage.averages[month] + transaction.Amount) / 2
-		} else {
-			monthAverage.averages[month] = transaction.Amount
-		}
-		balance += transaction.Amount
+		userTransactionInfo.MonthlyTransactions[month] += 1
 
-		// Print progress
+		userTransactionInfo.MonthlyAverages[month] = userTransactionInfo.MonthlyAverages[month].Add(transaction.Amount)
+
+		userTransactionInfo.Balance = userTransactionInfo.Balance.Add(transaction.Amount)
+
 		fmt.Printf("Processed transaction: %+v\n", transaction)
-		fmt.Printf("Month: %d, Transaction count: %d, Average amount: %.2f\n",
-			month, monthAverage.trxPerMonth[month], monthAverage.averages[month])
-		fmt.Printf("Running balance: %.2f\n", balance)
+		fmt.Printf("Month: %d, Transaction count: %d, ", month, userTransactionInfo.MonthlyTransactions[month])
+		fmt.Println("Average amount: ", userTransactionInfo.MonthlyAverages[month])
+		fmt.Println("Running balance: ", userTransactionInfo.Balance)
 		fmt.Println("------")
 	}
 
-	// 🔚 Final Summary
+	for i, monthlyAverage := range userTransactionInfo.MonthlyAverages {
+		userTransactionInfo.MonthlyAverages[i] = monthlyAverage.DivRound(decimal.NewFromInt(userTransactionInfo.MonthlyTransactions[i]), 2)
+	}
+
 	fmt.Println("========== Final Summary ==========")
-	fmt.Printf("Total balance: %.2f\n", balance)
+	fmt.Println("Total balance: ", userTransactionInfo.Balance)
 	fmt.Println("Transactions per month:")
-	for month, count := range monthAverage.trxPerMonth {
-		fmt.Printf("  Month %02d: %d transactions\n", month, count)
+	for month, count := range userTransactionInfo.MonthlyTransactions {
+		fmt.Printf("Month %02d: %d transactions\n", month, count)
 	}
 	fmt.Println("Average amount per month:")
-	for month, avg := range monthAverage.averages {
-		fmt.Printf("  Month %02d: %.2f average amount\n", month, avg)
+	for month, avg := range userTransactionInfo.MonthlyAverages {
+		fmt.Printf("Month %02d: ,", month)
+		fmt.Println("average amount: ", avg)
 	}
 	fmt.Println("===================================")
 
-	return nil
+	return userTransactionInfo, nil
 }

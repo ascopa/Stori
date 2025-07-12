@@ -1,5 +1,5 @@
-Id,Date,Transaction
-0,7/15,+60.5
-0,7/28,-10.3
-0,8/2,-20.46
-0,8/13,+10
+TransactionId,Date,Amount,AccountId
+0,7/15,+60.5,axz
+1,7/28,-10.3,axz
+2,8/2,-20.46,axz
+3,8/13,+10,axz

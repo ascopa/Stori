@@ -1,33 +1,28 @@
 package factory
 
 import (
-	controller2 "process-user-transaction/internal/adapters/inbound/s3"
-	"process-user-transaction/internal/core/controller"
-	"process-user-transaction/internal/core/parsers"
+	"context"
+	"fmt"
+	"github.com/aws/aws-lambda-go/events"
+	"github.com/aws/aws-sdk-go-v2/config"
+	"process-user-transaction/internal/adapters/inbound/s3"
+	"process-user-transaction/internal/adapters/outbound/repository"
 	"process-user-transaction/internal/core/service"
 )
 
 type Factory struct {
-	service controller.Service
 }
 
-func NewFactory() *Factory {
-	contentParsers := parsers.NewContentParsers(
-		parsers.NewTxtContentParser(),
-		parsers.NewXmlContentParser(),
-		parsers.NewJpgContentParser(),
-	)
-
-	d := service.NewService()
-
-	s := controller2.NewController(d, contentParsers)
-	return &Factory{service: s}
-}
-
-func (f *Factory) Start(inputDir, outputDir string) error {
-	err := f.service.Handle(inputDir, outputDir)
+func (f *Factory) Start(ctx context.Context, s3Event events.S3Event) error {
+	sdkConfig, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
-		return err
+		return fmt.Errorf("couldn't load default configuration: %w", err)
 	}
-	return nil
+
+	repo := repository.NewTransactionsRepository(sdkConfig)
+	s3Client := s3.NewS3CustomClient(sdkConfig)
+	s := service.NewService(repo)
+	c := s3.NewController(s, s3Client)
+
+	return c.Handle(ctx, s3Event)
 }

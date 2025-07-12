@@ -3,18 +3,14 @@ package repository
 import (
 	"context"
 	"fmt"
+	"process-user-transaction/internal/core/domain"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/feature/dynamodb/attributevalue"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 )
 
-type Transaction struct {
-	TransactionId string  `json:"transactionId"`
-	CreatedDate   string  `json:"createdDate"`
-	UpdatedDate   string  `json:"updatedDate"`
-	Amount        float64 `json:"amount"`
-}
+const TABLE_NAME = "Transactions"
 
 type TransactionsRepository struct {
 	db        *dynamodb.Client
@@ -22,17 +18,19 @@ type TransactionsRepository struct {
 }
 
 type ITransactionRepository interface {
-	PutUser(ctx context.Context, transaction Transaction) error
+	PutTransaction(ctx context.Context, transaction domain.Transaction) error
 }
 
-func NewTransactionsRepository(db *dynamodb.Client, tableName string) *TransactionsRepository {
+func NewTransactionsRepository(cfg aws.Config) *TransactionsRepository {
+	client := dynamodb.NewFromConfig(cfg)
+
 	return &TransactionsRepository{
-		db:        db,
-		tableName: tableName,
+		db:        client,
+		tableName: TABLE_NAME,
 	}
 }
 
-func (r *TransactionsRepository) PutUser(ctx context.Context, transaction Transaction) error {
+func (r *TransactionsRepository) PutTransaction(ctx context.Context, transaction domain.Transaction) error {
 	item, err := attributevalue.MarshalMap(transaction)
 	if err != nil {
 		return fmt.Errorf("failed to marshal user: %w", err)
