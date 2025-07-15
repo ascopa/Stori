@@ -31,7 +31,9 @@ func NewTransactionsRepository(cfg aws.Config) *TransactionsRepository {
 }
 
 func (r *TransactionsRepository) PutTransaction(ctx context.Context, transaction domain.Transaction) error {
-	item, err := attributevalue.MarshalMap(transaction)
+	transactionItem := domain.ToTransactionItem(transaction)
+
+	item, err := attributevalue.MarshalMap(transactionItem)
 	if err != nil {
 		return fmt.Errorf("failed to marshal user: %w", err)
 	}
