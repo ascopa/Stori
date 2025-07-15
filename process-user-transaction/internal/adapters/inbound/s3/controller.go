@@ -2,10 +2,12 @@ package s3
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/gocarina/gocsv"
 	"log"
+	"process-user-transaction/internal/adapters/outbound/event"
 	"process-user-transaction/internal/core/domain"
 	"process-user-transaction/internal/core/service"
 )
@@ -13,12 +15,14 @@ import (
 type Controller struct {
 	s  service.IService
 	s3 IS3CustomClient
+	e  event.IEventBridgeCustomClient
 }
 
-func NewController(service service.IService, s3Client IS3CustomClient) Controller {
+func NewController(service service.IService, s3Client IS3CustomClient, eventBridgeClient event.IEventBridgeCustomClient) Controller {
 	return Controller{
 		s:  service,
 		s3: s3Client,
+		e:  eventBridgeClient,
 	}
 }
 
@@ -45,6 +49,16 @@ func (c *Controller) Handle(ctx context.Context, s3Event events.S3Event) error {
 		userTransactionInfo, err := c.s.ProcessUserTransactions(transactions)
 		if err != nil {
 			return fmt.Errorf("error processing file: %w", err)
+		}
+
+		message, err := json.Marshal(userTransactionInfo)
+		if err != nil {
+			return err
+		}
+
+		err = c.e.PutEvents(message, "user_notification")
+		if err != nil {
+			return err
 		}
 
 		fmt.Printf("File processed: s3://%s/%s\n", bucket, key)
