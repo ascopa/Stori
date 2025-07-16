@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/aws/aws-lambda-go/events"
-	"process-user-transaction/internal/core/domain"
-	"process-user-transaction/internal/core/service"
+	"send-user-email/internal/core/domain"
+	"send-user-email/internal/core/service"
 )
 
 type Controller struct {

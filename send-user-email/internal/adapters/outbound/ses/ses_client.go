@@ -3,6 +3,7 @@ package ses
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ses"
 	"github.com/aws/aws-sdk-go-v2/service/ses/types"
@@ -31,8 +32,10 @@ func (s *SesCustomClient) SendEmail(email, subject string, body bytes.Buffer) er
 				},
 			},
 		},
-		Source: aws.String("your_verified_email@example.com"),
+		Source: aws.String("scopaalejandro+send@gmail.com"),
 	}
+
+	fmt.Println("Rendered HTML:\n", body.String())
 
 	_, err := s.sesClient.SendEmail(context.TODO(), input)
 	if err != nil {

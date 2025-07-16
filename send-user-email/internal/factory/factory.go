@@ -5,10 +5,11 @@ import (
 	"fmt"
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go-v2/config"
-	"process-user-transaction/internal/adapters/inbound/repository"
-	"process-user-transaction/internal/adapters/inbound/sqs"
-	"process-user-transaction/internal/adapters/outbound/ses"
-	"process-user-transaction/internal/core/service"
+	"send-user-email/internal/adapters/inbound/repository"
+	"send-user-email/internal/adapters/inbound/s3"
+	"send-user-email/internal/adapters/inbound/sqs"
+	"send-user-email/internal/adapters/outbound/ses"
+	"send-user-email/internal/core/service"
 )
 
 type Factory struct {
@@ -22,7 +23,8 @@ func (f *Factory) Start(ctx context.Context, sqsEvent events.SQSEvent) error {
 
 	repo := repository.NewUsersRepository(sdkConfig)
 	sesCustomClient := ses.NewSesCustomClient(sdkConfig)
-	s := service.NewService(repo, sesCustomClient)
+	s3CustomClient := s3.NewS3CustomClient(sdkConfig)
+	s := service.NewService(repo, sesCustomClient, s3CustomClient)
 	c := sqs.NewController(s)
 
 	return c.Handle(ctx, sqsEvent)

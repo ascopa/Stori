@@ -2,7 +2,7 @@ package main
 
 import (
 	"github.com/aws/aws-lambda-go/lambda"
-	"process-user-transaction/internal/factory"
+	"send-user-email/internal/factory"
 )
 
 func main() {

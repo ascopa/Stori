@@ -29,9 +29,15 @@ func NewService(repository repository.ITransactionRepository) *Service {
 func (s *Service) ProcessUserTransactions(transactions []domain.Transaction) (domain.UserTransactionInfo, error) {
 	var userTransactionInfo domain.UserTransactionInfo
 
-	userTransactionInfo.MonthlyAverages = make(map[int]decimal.Decimal)
+	userTransactionInfo.AccountId = transactions[0].AccountId
+
+	userTransactionInfo.MonthlyDebitAverages = make(map[int]decimal.Decimal)
+	userTransactionInfo.MonthlyCreditAverages = make(map[int]decimal.Decimal)
 	userTransactionInfo.MonthlyTransactionsAmount = make(map[int]decimal.Decimal)
 	userTransactionInfo.MonthlyTransactions = make(map[int]int64)
+
+	monthlyCreditTransactions := make(map[int]int64)
+	monthlyDebitTransactions := make(map[int]int64)
 
 	for _, transaction := range transactions {
 		err := s.r.PutTransaction(context.Background(), transaction)
@@ -42,19 +48,30 @@ func (s *Service) ProcessUserTransactions(transactions []domain.Transaction) (do
 		}
 		userTransactionInfo.MonthlyTransactions[month] += 1
 
-		userTransactionInfo.MonthlyAverages[month] = userTransactionInfo.MonthlyAverages[month].Add(transaction.Amount)
+		if transaction.Amount.GreaterThan(decimal.NewFromInt(0)) {
+			userTransactionInfo.MonthlyCreditAverages[month] = userTransactionInfo.MonthlyCreditAverages[month].Add(transaction.Amount)
+			monthlyCreditTransactions[month] += 1
+		} else {
+			userTransactionInfo.MonthlyDebitAverages[month] = userTransactionInfo.MonthlyDebitAverages[month].Add(transaction.Amount)
+			monthlyDebitTransactions[month] += 1
+		}
 
 		userTransactionInfo.Balance = userTransactionInfo.Balance.Add(transaction.Amount)
 
 		fmt.Printf("Processed transaction: %+v\n", transaction)
 		fmt.Printf("Month: %d, Transaction count: %d, ", month, userTransactionInfo.MonthlyTransactions[month])
-		fmt.Println("Average amount: ", userTransactionInfo.MonthlyAverages[month])
+		fmt.Println("Average credit amount: ", userTransactionInfo.MonthlyCreditAverages[month])
+		fmt.Println("Average debit amount: ", userTransactionInfo.MonthlyDebitAverages[month])
 		fmt.Println("Running balance: ", userTransactionInfo.Balance)
 		fmt.Println("------")
 	}
 
-	for i, monthlyAverage := range userTransactionInfo.MonthlyAverages {
-		userTransactionInfo.MonthlyAverages[i] = monthlyAverage.DivRound(decimal.NewFromInt(userTransactionInfo.MonthlyTransactions[i]), 2)
+	for i, monthlyAverage := range userTransactionInfo.MonthlyDebitAverages {
+		userTransactionInfo.MonthlyDebitAverages[i] = monthlyAverage.DivRound(decimal.NewFromInt(monthlyDebitTransactions[i]), 2)
+	}
+
+	for i, monthlyAverage := range userTransactionInfo.MonthlyCreditAverages {
+		userTransactionInfo.MonthlyCreditAverages[i] = monthlyAverage.DivRound(decimal.NewFromInt(monthlyCreditTransactions[i]), 2)
 	}
 
 	fmt.Println("========== Final Summary ==========")
@@ -63,8 +80,13 @@ func (s *Service) ProcessUserTransactions(transactions []domain.Transaction) (do
 	for month, count := range userTransactionInfo.MonthlyTransactions {
 		fmt.Printf("Month %02d: %d transactions\n", month, count)
 	}
-	fmt.Println("Average amount per month:")
-	for month, avg := range userTransactionInfo.MonthlyAverages {
+	fmt.Println("Average credit amount per month:")
+	for month, avg := range userTransactionInfo.MonthlyCreditAverages {
+		fmt.Printf("Month %02d: ,", month)
+		fmt.Println("average amount: ", avg)
+	}
+	fmt.Println("Average debit amount per month:")
+	for month, avg := range userTransactionInfo.MonthlyDebitAverages {
 		fmt.Printf("Month %02d: ,", month)
 		fmt.Println("average amount: ", avg)
 	}
