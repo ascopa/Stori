@@ -4,13 +4,18 @@ import (
 	"context"
 	"fmt"
 	"github.com/shopspring/decimal"
+	"os"
 	"process-user-transaction/internal/adapters/outbound/repository"
 	"process-user-transaction/internal/core/domain"
 	"strconv"
 	"strings"
+	"sync"
 )
 
-const ()
+const (
+	NUM_WORKERS  = "NUM_WORKERS"
+	ENABLE_DEBUG = "ENABLE_DEBUG"
+)
 
 type Service struct {
 	r repository.ITransactionRepository
@@ -30,82 +35,152 @@ func (s *Service) ProcessUserTransactions(transactions []domain.Transaction) (do
 	var userTransactionInfo domain.UserTransactionInfo
 
 	userTransactionInfo.AccountId = transactions[0].AccountId
-
 	userTransactionInfo.MonthlyDebitAverages = make(map[int]decimal.Decimal)
 	userTransactionInfo.MonthlyCreditAverages = make(map[int]decimal.Decimal)
 	userTransactionInfo.MonthlyTransactions = make(map[int]int)
 
-	monthlyDebitTransactions := make(map[int]map[string]decimal.Decimal)
-	monthlyCreditTransactions := make(map[int]map[string]decimal.Decimal)
+	numWorkers, err := strconv.Atoi(os.Getenv(NUM_WORKERS))
+	if err != nil {
+		return domain.UserTransactionInfo{}, fmt.Errorf("failed to convert NUM_WORKERS to int: %w", err)
+	}
 
-	debitTrxInfoChan := make(chan TransactionInfo)
-	creditTrxInfoChan := make(chan TransactionInfo)
-	errorChan := make(chan error)
-	quitChan := make(chan int)
+	resultChan := make(chan PartialResult)
+	errChan := make(chan error, numWorkers)
+
+	var wgDB sync.WaitGroup
+	var wgProcessTrx sync.WaitGroup
+	wgDB.Add(numWorkers)
+	wgProcessTrx.Add(numWorkers)
+
+	chunkSize := len(transactions) / numWorkers
+	for i := 0; i < numWorkers; i++ {
+		start := i * chunkSize
+		end := start + chunkSize
+		if i == numWorkers-1 {
+			end = len(transactions)
+		}
+
+		chunk := transactions[start:end]
+
+		go func(chunk []domain.Transaction) {
+			defer wgProcessTrx.Done()
+			processTransactionsChunk(chunk, resultChan, errChan)
+		}(chunk)
+		go func(chunk []domain.Transaction) {
+			defer wgDB.Done()
+			s.putTransactions(chunk, errChan)
+		}(chunk)
+	}
 
 	go func() {
-		for _, transaction := range transactions {
-			err := s.r.PutTransaction(context.Background(), transaction)
-			if err != nil {
-				return
-			}
-			extractTransactionInfo(transaction, debitTrxInfoChan, creditTrxInfoChan, errorChan)
-			fmt.Printf("Processed transaction: %+v\n", transaction)
-		}
-		close(debitTrxInfoChan)
-		close(creditTrxInfoChan)
-		quitChan <- 0
+		wgProcessTrx.Wait()
+		close(resultChan)
 	}()
 
-	var done bool
+	go func() {
+		wgDB.Wait()
+		close(errChan)
+	}()
 
-	for !done {
-		select {
-		case value, ok := <-debitTrxInfoChan:
-			if ok {
-				if _, exists := monthlyDebitTransactions[value.Month]; !exists {
-					monthlyDebitTransactions[value.Month] = make(map[string]decimal.Decimal)
-				}
-				monthlyDebitTransactions[value.Month][value.TransactionId] = value.Amount
-			}
-		case value, ok := <-creditTrxInfoChan:
-			if ok {
-				if _, exists := monthlyCreditTransactions[value.Month]; !exists {
-					monthlyCreditTransactions[value.Month] = make(map[string]decimal.Decimal)
-				}
-				monthlyCreditTransactions[value.Month][value.TransactionId] = value.Amount
-			}
-		case err := <-errorChan:
-			return domain.UserTransactionInfo{}, err
-		case <-quitChan:
-			done = true
+	final := PartialResult{
+		SumMonthlyCredit: make(map[int]decimal.Decimal),
+		SumMonthlyDebit:  make(map[int]decimal.Decimal),
+		CountCredit:      make(map[int]int),
+		CountDebit:       make(map[int]int),
+	}
+
+	for partial := range resultChan {
+		for month, sum := range partial.SumMonthlyCredit {
+			final.SumMonthlyCredit[month] = final.SumMonthlyCredit[month].Add(sum)
+			final.CountCredit[month] += partial.CountCredit[month]
+		}
+		for month, sum := range partial.SumMonthlyDebit {
+			final.SumMonthlyDebit[month] = final.SumMonthlyDebit[month].Add(sum)
+			final.CountDebit[month] += partial.CountDebit[month]
 		}
 	}
 
-	var balance decimal.Decimal
-
-	for i, monthlyAverage := range monthlyDebitTransactions {
-		var monthlyDebit decimal.Decimal
-		for _, amount := range monthlyAverage {
-			monthlyDebit = monthlyDebit.Add(amount)
-			userTransactionInfo.MonthlyTransactions[i] += 1
-		}
-		userTransactionInfo.MonthlyDebitAverages[i] = monthlyDebit.DivRound(decimal.NewFromInt(int64(len(monthlyAverage))), 2)
-		balance = balance.Add(monthlyDebit)
+	for err = range errChan {
+		fmt.Printf("error processing trx %s", err)
 	}
 
-	for i, monthlyAverage := range monthlyCreditTransactions {
-		var monthlyCredit decimal.Decimal
-		for _, amount := range monthlyAverage {
-			monthlyCredit = monthlyCredit.Add(amount)
-			userTransactionInfo.MonthlyTransactions[i] += 1
-		}
-		userTransactionInfo.MonthlyCreditAverages[i] = monthlyCredit.DivRound(decimal.NewFromInt(int64(len(monthlyAverage))), 2)
-		balance = balance.Add(monthlyCredit)
+	for month, total := range final.SumMonthlyCredit {
+		avg := total.DivRound(decimal.NewFromInt(int64(final.CountCredit[month])), 2)
+		userTransactionInfo.MonthlyCreditAverages[month] = avg
+		userTransactionInfo.Balance = userTransactionInfo.Balance.Add(total)
+		userTransactionInfo.MonthlyTransactions[month] += final.CountCredit[month]
 	}
 
-	userTransactionInfo.Balance = balance
+	for month, total := range final.SumMonthlyDebit {
+		avg := total.DivRound(decimal.NewFromInt(int64(final.CountDebit[month])), 2)
+		userTransactionInfo.MonthlyDebitAverages[month] = avg
+		userTransactionInfo.Balance = userTransactionInfo.Balance.Add(total)
+		userTransactionInfo.MonthlyTransactions[month] += final.CountDebit[month]
+	}
 
+	if os.Getenv(ENABLE_DEBUG) == "true" {
+		log(userTransactionInfo)
+	}
+
+	return userTransactionInfo, nil
+}
+
+type PartialResult struct {
+	SumMonthlyCredit map[int]decimal.Decimal
+	SumMonthlyDebit  map[int]decimal.Decimal
+	CountCredit      map[int]int
+	CountDebit       map[int]int
+}
+
+func (s *Service) putTransactions(transactions []domain.Transaction, errChan chan error) {
+	for _, trx := range transactions {
+		err := s.r.PutTransaction(context.Background(), trx)
+		if err != nil {
+			err = fmt.Errorf("error saving transaction on dynamoDB for trx with transactionId %s and err %s", trx.TransactionId, err)
+			errChan <- err
+			continue
+		}
+	}
+}
+
+func processTransactionsChunk(transactions []domain.Transaction, partialResultChan chan PartialResult, errChan chan error) {
+	result := PartialResult{
+		SumMonthlyCredit: make(map[int]decimal.Decimal),
+		SumMonthlyDebit:  make(map[int]decimal.Decimal),
+		CountCredit:      make(map[int]int),
+		CountDebit:       make(map[int]int),
+	}
+
+	for _, trx := range transactions {
+		month, err := extractMonth(trx)
+		if err != nil {
+			err = fmt.Errorf("error extracting month for trx with transactionId %s and err %s", trx.TransactionId, err)
+			errChan <- err
+			continue
+		}
+
+		if trx.Amount.GreaterThan(decimal.Zero) {
+			result.SumMonthlyCredit[month] = result.SumMonthlyCredit[month].Add(trx.Amount)
+			result.CountCredit[month]++
+		} else {
+			result.SumMonthlyDebit[month] = result.SumMonthlyDebit[month].Add(trx.Amount)
+			result.CountDebit[month]++
+		}
+	}
+
+	partialResultChan <- result
+}
+
+func extractMonth(transaction domain.Transaction) (int, error) {
+	trxMonth := strings.Split(transaction.CreatedDate, "/")[0]
+	month, err := strconv.Atoi(trxMonth)
+	if err != nil {
+		return 0, fmt.Errorf("error retrieving transaction month for transaction with transactionId %s and err %w", transaction.TransactionId, err)
+	}
+	return month, nil
+}
+
+func log(userTransactionInfo domain.UserTransactionInfo) {
 	fmt.Println("========== Final Summary ==========")
 	fmt.Println("Total balance: ", userTransactionInfo.Balance)
 	fmt.Println("Transactions per month:")
@@ -123,33 +198,4 @@ func (s *Service) ProcessUserTransactions(transactions []domain.Transaction) (do
 		fmt.Println("average amount: ", avg)
 	}
 	fmt.Println("===================================")
-
-	return userTransactionInfo, nil
-}
-
-type TransactionInfo struct {
-	TransactionId string
-	Amount        decimal.Decimal
-	Month         int
-}
-
-func extractTransactionInfo(transaction domain.Transaction, debitChannel chan TransactionInfo, creditChannel chan TransactionInfo, errChan chan error) {
-	trxMonth := strings.Split(transaction.CreatedDate, "/")[0]
-	month, err := strconv.Atoi(trxMonth)
-	if err != nil {
-		fmt.Printf("error retrieving transaction month for transaction with transactionId %s and err %s", transaction.TransactionId, err)
-		errChan <- err
-	}
-
-	transactionInfo := TransactionInfo{
-		TransactionId: transaction.TransactionId,
-		Amount:        transaction.Amount,
-		Month:         month,
-	}
-
-	if transaction.Amount.GreaterThan(decimal.NewFromInt(0)) {
-		creditChannel <- transactionInfo
-	} else {
-		debitChannel <- transactionInfo
-	}
 }

@@ -1,6 +1,8 @@
 package domain
 
-import "github.com/shopspring/decimal"
+import (
+	"github.com/shopspring/decimal"
+)
 
 type UserTransactionInfo struct {
 	MonthlyCreditAverages map[int]decimal.Decimal

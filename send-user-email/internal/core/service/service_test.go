@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"path"
 	"strings"
 	"testing"
 
@@ -113,8 +114,8 @@ func TestBuildTemplate_Success(t *testing.T) {
 		},
 	}
 
-	htmlTemplate, _ := os.ReadFile("template.html")
-	expectedTemplate, _ := os.ReadFile("expected_template.html")
+	htmlTemplate, _ := os.ReadFile(path.Join("template", "template.html"))
+	expectedTemplate, _ := os.ReadFile(path.Join("template", "expected_template.html"))
 
 	mockRepo.On("GetUserByAccountId", mock.Anything, "abc123").Return(user, nil)
 	mockS3.On("GetObject", mock.Anything, mock.Anything, mock.Anything).Return(io.NopCloser(strings.NewReader(string(htmlTemplate))), nil)
