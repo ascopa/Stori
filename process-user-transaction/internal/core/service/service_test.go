@@ -28,8 +28,8 @@ func TestHandleS3EventWithLocalCSV(t *testing.T) {
 
 	userTransactionInfo, err := service.ProcessUserTransactions(SampleTransactions)
 
-	assert.Equal(t, userTransactionInfo.MonthlyTransactions[7], 3)
-	assert.Equal(t, userTransactionInfo.MonthlyTransactions[8], 5)
+	assert.Equal(t, 3, userTransactionInfo.MonthlyTransactions[7])
+	assert.Equal(t, 5, userTransactionInfo.MonthlyTransactions[8])
 	assert.True(t, userTransactionInfo.Balance.Equal(decimal.NewFromFloat(64.74)))
 	assert.True(t, userTransactionInfo.MonthlyCreditAverages[7].Equal(decimal.NewFromFloat(35.25)))
 	assert.True(t, userTransactionInfo.MonthlyCreditAverages[8].Equal(decimal.NewFromFloat(11.67)))

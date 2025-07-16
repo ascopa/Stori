@@ -35,46 +35,76 @@ func (s *Service) ProcessUserTransactions(transactions []domain.Transaction) (do
 	userTransactionInfo.MonthlyCreditAverages = make(map[int]decimal.Decimal)
 	userTransactionInfo.MonthlyTransactions = make(map[int]int)
 
-	monthlyCreditTransactions := make(map[int]int)
-	monthlyDebitTransactions := make(map[int]int)
+	monthlyDebitTransactions := make(map[int]map[string]decimal.Decimal)
+	monthlyCreditTransactions := make(map[int]map[string]decimal.Decimal)
 
-	for _, transaction := range transactions {
-		err := s.r.PutTransaction(context.Background(), transaction)
-		if err != nil {
-			return domain.UserTransactionInfo{}, fmt.Errorf("error saving transaction with transactionId %s and err %w", transaction.TransactionId, err)
+	debitTrxInfoChan := make(chan TransactionInfo)
+	creditTrxInfoChan := make(chan TransactionInfo)
+	errorChan := make(chan error)
+	quitChan := make(chan int)
+
+	go func() {
+		for _, transaction := range transactions {
+			err := s.r.PutTransaction(context.Background(), transaction)
+			if err != nil {
+				return
+			}
+			extractTransactionInfo(transaction, debitTrxInfoChan, creditTrxInfoChan, errorChan)
+			fmt.Printf("Processed transaction: %+v\n", transaction)
 		}
-		trxMonth := strings.Split(transaction.CreatedDate, "/")[0]
-		month, err := strconv.Atoi(trxMonth)
-		if err != nil {
-			return domain.UserTransactionInfo{}, fmt.Errorf("error retrieving transaction month for transaction with transactionId %s and err %w", transaction.TransactionId, err)
+		close(debitTrxInfoChan)
+		close(creditTrxInfoChan)
+		quitChan <- 0
+	}()
+
+	var done bool
+
+	for !done {
+		select {
+		case value, ok := <-debitTrxInfoChan:
+			if ok {
+				if _, exists := monthlyDebitTransactions[value.Month]; !exists {
+					monthlyDebitTransactions[value.Month] = make(map[string]decimal.Decimal)
+				}
+				monthlyDebitTransactions[value.Month][value.TransactionId] = value.Amount
+			}
+		case value, ok := <-creditTrxInfoChan:
+			if ok {
+				if _, exists := monthlyCreditTransactions[value.Month]; !exists {
+					monthlyCreditTransactions[value.Month] = make(map[string]decimal.Decimal)
+				}
+				monthlyCreditTransactions[value.Month][value.TransactionId] = value.Amount
+			}
+		case err := <-errorChan:
+			return domain.UserTransactionInfo{}, err
+		case <-quitChan:
+			done = true
 		}
-
-		userTransactionInfo.MonthlyTransactions[month] += 1
-		if transaction.Amount.GreaterThan(decimal.NewFromInt(0)) {
-			userTransactionInfo.MonthlyCreditAverages[month] = userTransactionInfo.MonthlyCreditAverages[month].Add(transaction.Amount)
-			monthlyCreditTransactions[month] += 1
-		} else {
-			userTransactionInfo.MonthlyDebitAverages[month] = userTransactionInfo.MonthlyDebitAverages[month].Add(transaction.Amount)
-			monthlyDebitTransactions[month] += 1
-		}
-
-		userTransactionInfo.Balance = userTransactionInfo.Balance.Add(transaction.Amount)
-
-		fmt.Printf("Processed transaction: %+v\n", transaction)
-		fmt.Printf("Month: %d, Transaction count: %d, ", month, userTransactionInfo.MonthlyTransactions[month])
-		fmt.Println("Average credit amount: ", userTransactionInfo.MonthlyCreditAverages[month])
-		fmt.Println("Average debit amount: ", userTransactionInfo.MonthlyDebitAverages[month])
-		fmt.Println("Running balance: ", userTransactionInfo.Balance)
-		fmt.Println("------")
 	}
 
-	for i, monthlyAverage := range userTransactionInfo.MonthlyDebitAverages {
-		userTransactionInfo.MonthlyDebitAverages[i] = monthlyAverage.DivRound(decimal.NewFromInt(int64(monthlyDebitTransactions[i])), 2)
+	var balance decimal.Decimal
+
+	for i, monthlyAverage := range monthlyDebitTransactions {
+		var monthlyDebit decimal.Decimal
+		for _, amount := range monthlyAverage {
+			monthlyDebit = monthlyDebit.Add(amount)
+			userTransactionInfo.MonthlyTransactions[i] += 1
+		}
+		userTransactionInfo.MonthlyDebitAverages[i] = monthlyDebit.DivRound(decimal.NewFromInt(int64(len(monthlyAverage))), 2)
+		balance = balance.Add(monthlyDebit)
 	}
 
-	for i, monthlyAverage := range userTransactionInfo.MonthlyCreditAverages {
-		userTransactionInfo.MonthlyCreditAverages[i] = monthlyAverage.DivRound(decimal.NewFromInt(int64(monthlyCreditTransactions[i])), 2)
+	for i, monthlyAverage := range monthlyCreditTransactions {
+		var monthlyCredit decimal.Decimal
+		for _, amount := range monthlyAverage {
+			monthlyCredit = monthlyCredit.Add(amount)
+			userTransactionInfo.MonthlyTransactions[i] += 1
+		}
+		userTransactionInfo.MonthlyCreditAverages[i] = monthlyCredit.DivRound(decimal.NewFromInt(int64(len(monthlyAverage))), 2)
+		balance = balance.Add(monthlyCredit)
 	}
+
+	userTransactionInfo.Balance = balance
 
 	fmt.Println("========== Final Summary ==========")
 	fmt.Println("Total balance: ", userTransactionInfo.Balance)
@@ -95,4 +125,31 @@ func (s *Service) ProcessUserTransactions(transactions []domain.Transaction) (do
 	fmt.Println("===================================")
 
 	return userTransactionInfo, nil
+}
+
+type TransactionInfo struct {
+	TransactionId string
+	Amount        decimal.Decimal
+	Month         int
+}
+
+func extractTransactionInfo(transaction domain.Transaction, debitChannel chan TransactionInfo, creditChannel chan TransactionInfo, errChan chan error) {
+	trxMonth := strings.Split(transaction.CreatedDate, "/")[0]
+	month, err := strconv.Atoi(trxMonth)
+	if err != nil {
+		fmt.Printf("error retrieving transaction month for transaction with transactionId %s and err %s", transaction.TransactionId, err)
+		errChan <- err
+	}
+
+	transactionInfo := TransactionInfo{
+		TransactionId: transaction.TransactionId,
+		Amount:        transaction.Amount,
+		Month:         month,
+	}
+
+	if transaction.Amount.GreaterThan(decimal.NewFromInt(0)) {
+		creditChannel <- transactionInfo
+	} else {
+		debitChannel <- transactionInfo
+	}
 }
