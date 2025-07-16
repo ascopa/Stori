@@ -33,21 +33,23 @@ func (s *Service) ProcessUserTransactions(transactions []domain.Transaction) (do
 
 	userTransactionInfo.MonthlyDebitAverages = make(map[int]decimal.Decimal)
 	userTransactionInfo.MonthlyCreditAverages = make(map[int]decimal.Decimal)
-	userTransactionInfo.MonthlyTransactionsAmount = make(map[int]decimal.Decimal)
-	userTransactionInfo.MonthlyTransactions = make(map[int]int64)
+	userTransactionInfo.MonthlyTransactions = make(map[int]int)
 
-	monthlyCreditTransactions := make(map[int]int64)
-	monthlyDebitTransactions := make(map[int]int64)
+	monthlyCreditTransactions := make(map[int]int)
+	monthlyDebitTransactions := make(map[int]int)
 
 	for _, transaction := range transactions {
 		err := s.r.PutTransaction(context.Background(), transaction)
+		if err != nil {
+			return domain.UserTransactionInfo{}, fmt.Errorf("error saving transaction with transactionId %s and err %w", transaction.TransactionId, err)
+		}
 		trxMonth := strings.Split(transaction.CreatedDate, "/")[0]
 		month, err := strconv.Atoi(trxMonth)
 		if err != nil {
-			return domain.UserTransactionInfo{}, err
+			return domain.UserTransactionInfo{}, fmt.Errorf("error retrieving transaction month for transaction with transactionId %s and err %w", transaction.TransactionId, err)
 		}
-		userTransactionInfo.MonthlyTransactions[month] += 1
 
+		userTransactionInfo.MonthlyTransactions[month] += 1
 		if transaction.Amount.GreaterThan(decimal.NewFromInt(0)) {
 			userTransactionInfo.MonthlyCreditAverages[month] = userTransactionInfo.MonthlyCreditAverages[month].Add(transaction.Amount)
 			monthlyCreditTransactions[month] += 1
@@ -67,11 +69,11 @@ func (s *Service) ProcessUserTransactions(transactions []domain.Transaction) (do
 	}
 
 	for i, monthlyAverage := range userTransactionInfo.MonthlyDebitAverages {
-		userTransactionInfo.MonthlyDebitAverages[i] = monthlyAverage.DivRound(decimal.NewFromInt(monthlyDebitTransactions[i]), 2)
+		userTransactionInfo.MonthlyDebitAverages[i] = monthlyAverage.DivRound(decimal.NewFromInt(int64(monthlyDebitTransactions[i])), 2)
 	}
 
 	for i, monthlyAverage := range userTransactionInfo.MonthlyCreditAverages {
-		userTransactionInfo.MonthlyCreditAverages[i] = monthlyAverage.DivRound(decimal.NewFromInt(monthlyCreditTransactions[i]), 2)
+		userTransactionInfo.MonthlyCreditAverages[i] = monthlyAverage.DivRound(decimal.NewFromInt(int64(monthlyCreditTransactions[i])), 2)
 	}
 
 	fmt.Println("========== Final Summary ==========")
