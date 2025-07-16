@@ -10,7 +10,8 @@ import (
 )
 
 const (
-	TABLE_NAME = "Users"
+	TABLE_NAME    = "Users"
+	ACCOUNT_ID_PK = "AccountId"
 )
 
 type UsersRepository struct {
@@ -33,7 +34,7 @@ func NewUsersRepository(cfg aws.Config) *UsersRepository {
 
 func (r *UsersRepository) GetUserByAccountId(ctx context.Context, accountId string) (*domain.User, error) {
 	key, err := attributevalue.MarshalMap(map[string]string{
-		"AccountId": accountId,
+		ACCOUNT_ID_PK: accountId,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal key: %w", err)

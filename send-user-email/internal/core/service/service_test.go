@@ -1,16 +1,16 @@
-package service_test
+package service
 
 import (
 	"bytes"
 	"context"
 	"io"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"send-user-email/internal/core/domain"
-	"send-user-email/internal/core/service"
 )
 
 type MockUserRepo struct {
@@ -41,8 +41,6 @@ func (m *MockS3Client) GetObject(ctx context.Context, bucket, key string) (io.Re
 }
 
 func TestSendUserEmail_Success(t *testing.T) {
-	ctx := context.Background()
-
 	mockRepo := new(MockUserRepo)
 	mockSes := new(MockSesClient)
 	mockS3 := new(MockS3Client)
@@ -52,18 +50,49 @@ func TestSendUserEmail_Success(t *testing.T) {
 		Email: "john@example.com",
 	}
 
-	htmlTemplate := `
-		<html><body>
-			<h1>Hello {{.Name}}</h1>
-			<p>Your balance is {{.Balance}}</p>
-		</body></html>`
+	msg := domain.Message{
+		Detail: domain.Detail{
+			AccountId: "abc123",
+			Balance:   "69.74",
+			MonthlyTransactions: map[int]int{
+				7: 2,
+				9: 3,
+			},
+			MonthlyCreditAverages: map[int]string{
+				7: "30.25",
+				9: "11.11",
+			},
+			MonthlyDebitAverages: map[int]string{
+				7: "-30.25",
+				9: "-3.00",
+			},
+		},
+	}
+
+	htmlTemplate, _ := os.ReadFile("template.html")
 
 	mockRepo.On("GetUserByAccountId", mock.Anything, "abc123").Return(user, nil)
-	mockS3.On("GetObject", mock.Anything, "stori-user-transactions-email-templates", "template.html").
-		Return(io.NopCloser(strings.NewReader(htmlTemplate)), nil)
-	mockSes.On("SendEmail", user.Email, "trx notification", mock.MatchedBy(func(body string) bool {
-		return strings.Contains(body, "John Doe") && strings.Contains(body, "69.74")
-	})).Return(nil)
+	mockS3.On("GetObject", mock.Anything, mock.Anything, mock.Anything).Return(io.NopCloser(strings.NewReader(string(htmlTemplate))), nil)
+	mockSes.On("SendEmail", user.Email, "trx notification", mock.Anything).Return(nil)
+
+	svc := NewService(mockRepo, mockSes, mockS3)
+	err := svc.SendUserEmail(context.Background(), msg)
+
+	assert.NoError(t, err)
+	mockRepo.AssertExpectations(t)
+	mockS3.AssertExpectations(t)
+	mockSes.AssertExpectations(t)
+}
+
+func TestBuildTemplate_Success(t *testing.T) {
+	mockRepo := new(MockUserRepo)
+	mockSes := new(MockSesClient)
+	mockS3 := new(MockS3Client)
+
+	user := &domain.User{
+		Name:  "John Doe",
+		Email: "john@example.com",
+	}
 
 	msg := domain.Message{
 		Detail: domain.Detail{
@@ -71,21 +100,31 @@ func TestSendUserEmail_Success(t *testing.T) {
 			Balance:   "69.74",
 			MonthlyTransactions: map[int]int{
 				7: 2,
+				9: 3,
 			},
 			MonthlyCreditAverages: map[int]string{
-				7: "20.00",
+				7: "30.25",
+				9: "11.11",
 			},
 			MonthlyDebitAverages: map[int]string{
-				7: "-5.00",
+				7: "-30.25",
+				9: "-3.00",
 			},
 		},
 	}
 
-	svc := service.NewService(mockRepo, mockSes, mockS3)
-	err := svc.SendUserEmail(ctx, msg)
+	htmlTemplate, _ := os.ReadFile("template.html")
+	expectedTemplate, _ := os.ReadFile("expected_template.html")
+
+	mockRepo.On("GetUserByAccountId", mock.Anything, "abc123").Return(user, nil)
+	mockS3.On("GetObject", mock.Anything, mock.Anything, mock.Anything).Return(io.NopCloser(strings.NewReader(string(htmlTemplate))), nil)
+	mockSes.On("SendEmail", user.Email, "trx notification", mock.Anything).Return(nil)
+
+	svc := NewService(mockRepo, mockSes, mockS3)
+	renderedTemplate, err := svc.buildTemplate(context.TODO(), user, msg)
+
+	assert.Equal(t, string(expectedTemplate), renderedTemplate.String())
 
 	assert.NoError(t, err)
-	mockRepo.AssertExpectations(t)
 	mockS3.AssertExpectations(t)
-	mockSes.AssertExpectations(t)
 }
