@@ -1,4 +1,4 @@
-package utils
+package main
 
 import (
 	"encoding/csv"
@@ -9,9 +9,9 @@ import (
 	"time"
 )
 
-func GenerateFile() {
-	const filename = "transactions.csv"
-	const numTransactions = 10000
+func main() {
+	const filename = "transactions3000.csv"
+	const numTransactions = 3000
 
 	file, err := os.Create(filename)
 	if err != nil {
@@ -25,7 +25,7 @@ func GenerateFile() {
 	// Write header
 	writer.Write([]string{"TransactionId", "Date", "Amount", "AccountId"})
 
-	accountIds := []string{"acc1"}
+	accountIds := []string{"axz"}
 	rand.Seed(time.Now().UnixNano())
 
 	for i := 0; i < numTransactions; i++ {

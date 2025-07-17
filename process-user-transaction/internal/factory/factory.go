@@ -6,6 +6,7 @@ import (
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"process-user-transaction/internal/adapters/inbound/s3"
+	"process-user-transaction/internal/adapters/inbound/sqs"
 	"process-user-transaction/internal/adapters/outbound/event"
 	"process-user-transaction/internal/adapters/outbound/repository"
 	"process-user-transaction/internal/core/service"
@@ -14,7 +15,7 @@ import (
 type Factory struct {
 }
 
-func (f *Factory) Start(ctx context.Context, s3Event events.S3Event) error {
+func (f *Factory) Start(ctx context.Context, sqsEvent events.SQSEvent) error {
 	sdkConfig, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
 		return fmt.Errorf("couldn't load default configuration: %w", err)
@@ -24,7 +25,7 @@ func (f *Factory) Start(ctx context.Context, s3Event events.S3Event) error {
 	s3Client := s3.NewS3CustomClient(sdkConfig)
 	eventsClient := event.NewEventBridgeCustomClient(sdkConfig)
 	s := service.NewService(repo)
-	c := s3.NewController(s, s3Client, eventsClient)
+	c := sqs.NewController(s, s3Client, eventsClient)
 
-	return c.Handle(ctx, s3Event)
+	return c.Handle(ctx, sqsEvent)
 }
