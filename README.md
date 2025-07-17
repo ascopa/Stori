@@ -13,6 +13,8 @@ The solution consists of two main AWS Lambda functions:
 
 Each Lambda is integrated using event-driven architecture with AWS EventBridge, S3, DynamoDB, and SES.
 
+<img width="1031" height="578" alt="Challenge (1)" src="https://github.com/user-attachments/assets/6a85ca06-7339-4684-b222-687a0f3a7d7f" />
+
 ---
 
 ## Lambda: `process-user-transaction`
