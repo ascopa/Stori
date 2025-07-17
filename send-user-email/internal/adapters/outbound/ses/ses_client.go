@@ -6,6 +6,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ses"
 	"github.com/aws/aws-sdk-go-v2/service/ses/types"
+	"os"
 )
 
 type ISesCustomClient interface {
@@ -31,7 +32,7 @@ func (s *SesCustomClient) SendEmail(email, subject string, body bytes.Buffer) er
 				},
 			},
 		},
-		Source: aws.String("scopaalejandro+send@gmail.com"),
+		Source: aws.String(os.Getenv("SES_SOURCE")),
 	}
 
 	_, err := s.sesClient.SendEmail(context.TODO(), input)

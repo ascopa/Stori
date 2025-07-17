@@ -15,8 +15,9 @@ import (
 )
 
 const (
-	BUCKET_NAME = "BUCKET_NAME"
-	BUCKET_KEY  = "BUCKET_KEY"
+	BUCKET_NAME   = "BUCKET_NAME"
+	BUCKET_KEY    = "BUCKET_KEY"
+	EMAIL_SUBJECT = "EMAIL_SUBJECT"
 )
 
 type Service struct {
@@ -48,7 +49,7 @@ func (s *Service) SendUserEmail(ctx context.Context, message domain.Message) err
 		return fmt.Errorf("failed to build template: %w", err)
 	}
 
-	err = s.ses.SendEmail(user.Email, "trx notification", builtTemplate)
+	err = s.ses.SendEmail(user.Email, os.Getenv(EMAIL_SUBJECT), builtTemplate)
 	if err != nil {
 		return fmt.Errorf("failed to send email: %w", err)
 	}
