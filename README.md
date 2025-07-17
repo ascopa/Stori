@@ -85,11 +85,11 @@ AccountId: AccountId123
 Email: storichallenge@gmail.com
 Name: John Doe
 
-📧 **Inbox Credentials**:
+**Inbox Credentials**:
 - Email: `storichallenge@gmail.com`
 - Password: `Challenge123*`
 
-📁 **Important**: The test CSV file must include the AccountId `AccountId123` for email delivery to succeed.
+**Important**: The test CSV file must include the AccountId `AccountId123` for email delivery to succeed.
 
 ---
 
